@@ -18,6 +18,9 @@ export class OrderResponseDto {
   id: string;
 
   @Expose()
+  mesaId: string;
+
+  @Expose()
   userId: string;
 
   @Expose()

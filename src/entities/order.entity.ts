@@ -29,7 +29,7 @@ export class OrderEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   mesaId: string | null;
 
   @Column({ type: 'uuid', nullable: false })
