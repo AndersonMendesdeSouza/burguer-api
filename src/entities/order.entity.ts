@@ -29,6 +29,9 @@ export class OrderEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ nullable: true })
+  mesaId: string | null;
+
   @Column({ type: 'uuid', nullable: false })
   userId: string;
 

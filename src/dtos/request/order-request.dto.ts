@@ -26,6 +26,9 @@ export class AlterStatusDto {
 
 export class OrderRequestDto {
   @IsOptional()
+  mesaId: string | null;
+
+  @IsOptional()
   @IsEnum(OrderStatusEnum)
   status?: OrderStatusEnum;
 
