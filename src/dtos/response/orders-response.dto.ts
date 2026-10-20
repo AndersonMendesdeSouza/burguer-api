@@ -21,11 +21,11 @@ export class OrderResponseDto {
   mesaId: string;
 
   @Expose()
-  userId: string;
+  userId: string | null;
 
   @Expose()
   @Type(() => UserResponseDto)
-  user: UserResponseDto;
+  user: UserResponseDto | null;
 
   @Expose()
   chatId?: string;
@@ -79,4 +79,9 @@ export class OrderResponseDto {
 
   @Expose()
   updatedAt: Date;
+}
+
+export class OrderCreatedResponseDto extends OrderResponseDto {
+  @Expose()
+  guestToken?: string;
 }

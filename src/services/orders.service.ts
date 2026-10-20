@@ -2,8 +2,11 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import type { FindOptionsWhere } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OrderEntity } from 'src/entities/order.entity';
 import { AddressEntity } from 'src/entities/address.entity';
@@ -11,11 +14,18 @@ import {
   AlterStatusDto,
   OrderRequestDto,
 } from 'src/dtos/request/order-request.dto';
-import { OrderResponseDto } from 'src/dtos/response/orders-response.dto';
+import {
+  OrderCreatedResponseDto,
+  OrderResponseDto,
+} from 'src/dtos/response/orders-response.dto';
 import { OrderStatusEnum } from 'src/dtos/enums/order-status.enum';
 import { UserRole } from 'src/dtos/enums/user-role.enum';
 import { ChatService } from './chat.service';
 import { toResponse } from 'src/utils/transform-response';
+import {
+  createGuestOrderToken,
+  verifyGuestOrderToken,
+} from 'src/utils/guest-order-token';
 
 type AuthenticatedUser = {
   id: string;
@@ -35,8 +45,8 @@ export class OrdersService {
 
   async create(
     dto: OrderRequestDto,
-    user: AuthenticatedUser,
-  ): Promise<OrderResponseDto> {
+    user?: AuthenticatedUser,
+  ): Promise<OrderCreatedResponseDto> {
     const mesaId = dto.mesaId?.trim() || null;
     const addressId = dto.addressId;
 
@@ -59,6 +69,10 @@ export class OrdersService {
     let address: AddressEntity | undefined;
 
     if (addressId) {
+      if (!user?.id) {
+        throw new UnauthorizedException('Faça login para pedir entrega');
+      }
+
       const savedAddress = await this.addressRepo.findOne({
         where: { id: addressId, userId: user.id },
       });
@@ -70,11 +84,18 @@ export class OrdersService {
       address = savedAddress;
     }
 
+    const guestOrderId = user ? undefined : randomUUID();
+    const guestToken = guestOrderId
+      ? createGuestOrderToken(guestOrderId)
+      : undefined;
+
     const order = this.repo.create({
       ...dto,
+      id: guestOrderId,
       mesaId,
       addressId: address?.id,
-      userId: user.id,
+      userId: user?.id ?? null,
+      status: OrderStatusEnum.RECEIVED,
       address,
     });
     order.history = [
@@ -86,9 +107,14 @@ export class OrdersService {
     ];
 
     const savedOrder = await this.repo.save(order);
-    await this.chatService.create({ orderId: savedOrder.id }, user);
+    if (user) {
+      await this.chatService.create({ orderId: savedOrder.id }, user);
+      return this.findById(savedOrder.id, user);
+    }
 
-    return this.findById(savedOrder.id, user);
+    const response = await this.findById(savedOrder.id, undefined, guestToken);
+
+    return { ...response, guestToken };
   }
 
   async findAll(user: AuthenticatedUser): Promise<OrderResponseDto[]> {
@@ -106,17 +132,17 @@ export class OrdersService {
 
   async findById(
     id: string,
-    user: AuthenticatedUser,
+    user?: AuthenticatedUser,
+    guestToken?: string,
   ): Promise<OrderResponseDto> {
-    const where =
-      user.role === UserRole.ADMIN ? { id } : { id, userId: user.id };
+    const where = this.getOrderWhere(id, user, guestToken);
 
     const order = await this.repo.findOne({
       where,
       relations: {
         user: true,
         address: true,
-        chat: { messages: { sender: true } },
+        chat: guestToken ? false : { messages: { sender: true } },
       },
     });
 
@@ -130,17 +156,17 @@ export class OrdersService {
   async alterStatus(
     id: string,
     status: AlterStatusDto,
-    user: AuthenticatedUser,
+    user?: AuthenticatedUser,
+    guestToken?: string,
   ): Promise<OrderResponseDto> {
-    const where =
-      user.role === UserRole.ADMIN ? { id } : { id, userId: user.id };
+    const where = this.getOrderWhere(id, user, guestToken);
 
     const order = await this.repo.findOne({
       where,
       relations: {
         user: true,
         address: true,
-        chat: { messages: { sender: true } },
+        chat: guestToken ? false : { messages: { sender: true } },
       },
     });
 
@@ -149,7 +175,7 @@ export class OrdersService {
     }
 
     if (
-      user.role !== UserRole.ADMIN &&
+      (guestToken || user?.role !== UserRole.ADMIN) &&
       status.status !== OrderStatusEnum.CANCELED
     ) {
       throw new BadRequestException('Cliente só pode cancelar o pedido');
@@ -243,5 +269,25 @@ export class OrdersService {
     await this.repo.remove(product);
 
     return { message: 'Produto removido com sucesso' };
+  }
+
+  private getOrderWhere(
+    id: string,
+    user?: AuthenticatedUser,
+    guestToken?: string,
+  ): FindOptionsWhere<OrderEntity> {
+    if (guestToken) {
+      verifyGuestOrderToken(guestToken, id);
+
+      return { id, userId: IsNull(), mesaId: Not(IsNull()) };
+    }
+
+    if (!user?.id) {
+      throw new UnauthorizedException('Faça login ou use a chave do pedido');
+    }
+
+    if (user.role === UserRole.ADMIN) return { id };
+
+    return { id, userId: user.id };
   }
 }

@@ -8,16 +8,21 @@ import {
   Patch,
   Req,
   UseGuards,
+  Headers,
 } from '@nestjs/common';
 import { UserRole } from 'src/dtos/enums/user-role.enum';
 import {
   AlterStatusDto,
   OrderRequestDto,
 } from 'src/dtos/request/order-request.dto';
-import { OrderResponseDto } from 'src/dtos/response/orders-response.dto';
+import {
+  OrderCreatedResponseDto,
+  OrderResponseDto,
+} from 'src/dtos/response/orders-response.dto';
 import { OrdersService } from 'src/services/orders.service';
 import type { Request as ExpressRequest } from 'express';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from 'src/auth/optional-jwt-auth.guard';
 
 type AuthenticatedUser = {
   id: string;
@@ -27,16 +32,19 @@ type AuthenticatedUser = {
 type AuthenticatedRequest = ExpressRequest & {
   user: AuthenticatedUser;
 };
+type OptionalAuthenticatedRequest = ExpressRequest & {
+  user?: AuthenticatedUser;
+};
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Post()
   async create(
     @Body() dto: OrderRequestDto,
-    @Req() req: AuthenticatedRequest,
-  ): Promise<OrderResponseDto> {
+    @Req() req: OptionalAuthenticatedRequest,
+  ): Promise<OrderCreatedResponseDto> {
     return await this.ordersService.create(dto, req.user);
   }
 
@@ -46,23 +54,25 @@ export class OrdersController {
     return await this.ordersService.findAll(req.user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   async findById(
     @Param('id') id: string,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: OptionalAuthenticatedRequest,
+    @Headers('x-order-token') guestToken?: string,
   ): Promise<OrderResponseDto> {
-    return await this.ordersService.findById(id, req.user);
+    return await this.ordersService.findById(id, req.user, guestToken);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Patch(':id')
   async alterStatus(
     @Param('id') id: string,
     @Body() status: AlterStatusDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: OptionalAuthenticatedRequest,
+    @Headers('x-order-token') guestToken?: string,
   ): Promise<OrderResponseDto> {
-    return this.ordersService.alterStatus(id, status, req.user);
+    return this.ordersService.alterStatus(id, status, req.user, guestToken);
   }
 
   @Delete(':id')

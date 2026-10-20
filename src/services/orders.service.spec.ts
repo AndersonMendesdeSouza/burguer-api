@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  InternalServerErrorException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PaymentMethodEnum } from '../dtos/enums/payment-method.enum';
@@ -8,9 +13,16 @@ import { AddressEntity } from '../entities/address.entity';
 import { OrderEntity } from '../entities/order.entity';
 import { ChatService } from './chat.service';
 import { OrdersService } from './orders.service';
+import { OrderStatusEnum } from '../dtos/enums/order-status.enum';
+import {
+  createGuestOrderToken,
+  verifyGuestOrderToken,
+} from '../utils/guest-order-token';
+import { IsNull, Not } from 'typeorm';
 
-describe('OrdersService.create', () => {
+describe('OrdersService', () => {
   let service: OrdersService;
+  const originalGuestSecret = process.env.GUEST_ORDER_SECRET;
 
   const user = {
     id: 'customer-id',
@@ -50,6 +62,7 @@ describe('OrdersService.create', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    process.env.GUEST_ORDER_SECRET = 'guest-order-test-secret';
 
     const module = await Test.createTestingModule({
       providers: [
@@ -61,10 +74,23 @@ describe('OrdersService.create', () => {
     }).compile();
 
     service = module.get(OrdersService);
-    orderRepo.create.mockReturnValue({ id: 'order-id' });
-    orderRepo.save.mockResolvedValue({ id: 'order-id' });
+    orderRepo.create.mockImplementation((dto: Partial<OrderEntity>) =>
+      Object.assign(new OrderEntity(), dto, { id: dto.id || 'order-id' }),
+    );
+    orderRepo.save.mockImplementation((order: OrderEntity) => {
+      orderRepo.findOne.mockResolvedValue(order);
+      return Promise.resolve(order);
+    });
     orderRepo.findOne.mockResolvedValue({ id: 'order-id', userId: user.id });
     addressRepo.findOne.mockResolvedValue(address);
+  });
+
+  afterAll(() => {
+    if (originalGuestSecret === undefined) {
+      delete process.env.GUEST_ORDER_SECRET;
+    } else {
+      process.env.GUEST_ORDER_SECRET = originalGuestSecret;
+    }
   });
 
   it('creates a table order without looking up an address', async () => {
@@ -164,5 +190,167 @@ describe('OrdersService.create', () => {
       where: { id: address.id, userId: user.id },
     });
     expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('creates a table order without login, returns its access token and skips chat', async () => {
+    const response = await service.create(createPayload());
+
+    expect(response.userId).toBeNull();
+    expect(response.mesaId).toBe('12');
+    expect(response.guestToken).toEqual(expect.any(String));
+    expect(() =>
+      verifyGuestOrderToken(response.guestToken!, response.id),
+    ).not.toThrow();
+    expect(chatService.create).not.toHaveBeenCalled();
+    expect(addressRepo.findOne).not.toHaveBeenCalled();
+    expect(orderRepo.findOne).toHaveBeenCalledWith({
+      where: { id: response.id, userId: IsNull(), mesaId: Not(IsNull()) },
+      relations: { user: true, address: true, chat: false },
+    });
+  });
+
+  it('rejects delivery without login before looking up any address or saving', async () => {
+    const dto = createPayload();
+    delete dto.mesaId;
+    dto.addressId = address.id;
+
+    await expect(service.create(dto)).rejects.toThrow(UnauthorizedException);
+    expect(addressRepo.findOne).not.toHaveBeenCalled();
+    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('refuses a guest order before saving when its secret is not configured', async () => {
+    delete process.env.GUEST_ORDER_SECRET;
+
+    await expect(service.create(createPayload())).rejects.toThrow(
+      InternalServerErrorException,
+    );
+    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('starts guest orders as received even if the client sends another status', async () => {
+    const dto = createPayload();
+    dto.status = OrderStatusEnum.DELIVERED;
+    const response = await service.create(dto);
+
+    expect(response.status).toBe(OrderStatusEnum.RECEIVED);
+  });
+
+  it('rejects reading an order without login or an access token', async () => {
+    await expect(service.findById('order-id')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(orderRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects using a valid guest token to read another order', async () => {
+    const token = createGuestOrderToken('first-order');
+
+    await expect(
+      service.findById('second-order', undefined, token),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(orderRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('restricts guest queries to table orders with no account owner', async () => {
+    const token = createGuestOrderToken('order-id');
+    orderRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.findById('order-id', undefined, token),
+    ).rejects.toThrow(NotFoundException);
+    expect(orderRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 'order-id', userId: IsNull(), mesaId: Not(IsNull()) },
+      relations: { user: true, address: true, chat: false },
+    });
+  });
+
+  it('allows a guest to cancel their own order with its token', async () => {
+    const token = createGuestOrderToken('order-id');
+    orderRepo.findOne.mockResolvedValue({
+      id: 'order-id',
+      userId: null,
+      mesaId: '12',
+      status: OrderStatusEnum.RECEIVED,
+      history: [],
+    });
+
+    const response = await service.alterStatus(
+      'order-id',
+      { status: OrderStatusEnum.CANCELED },
+      undefined,
+      token,
+    );
+
+    expect(response.status).toBe(OrderStatusEnum.CANCELED);
+    expect(orderRepo.save).toHaveBeenCalledTimes(1);
+    expect(chatService.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects using a guest token to cancel another order', async () => {
+    const token = createGuestOrderToken('first-order');
+
+    await expect(
+      service.alterStatus(
+        'second-order',
+        { status: OrderStatusEnum.CANCELED },
+        undefined,
+        token,
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(orderRepo.save).not.toHaveBeenCalled();
+    expect(orderRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('does not allow guests to advance the preparation status', async () => {
+    const token = createGuestOrderToken('order-id');
+
+    await expect(
+      service.alterStatus(
+        'order-id',
+        { status: OrderStatusEnum.PREPARING },
+        undefined,
+        token,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('does not allow guests to cancel a delivered order', async () => {
+    const token = createGuestOrderToken('order-id');
+    orderRepo.findOne.mockResolvedValue({
+      id: 'order-id',
+      status: OrderStatusEnum.DELIVERED,
+    });
+
+    await expect(
+      service.alterStatus(
+        'order-id',
+        { status: OrderStatusEnum.CANCELED },
+        undefined,
+        token,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(orderRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('still scopes authenticated customers to their own orders', async () => {
+    await service.findById('order-id', user);
+
+    expect(orderRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'order-id', userId: user.id },
+      }),
+    );
+  });
+
+  it('still allows administrators to query a guest order', async () => {
+    await service.findById('order-id', { ...user, role: UserRole.ADMIN });
+
+    expect(orderRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'order-id' },
+      }),
+    );
   });
 });

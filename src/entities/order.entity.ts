@@ -32,12 +32,12 @@ export class OrderEntity {
   @Column({ type: 'varchar', nullable: true })
   mesaId: string | null;
 
-  @Column({ type: 'uuid', nullable: false })
-  userId: string;
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
 
   @ManyToOne(() => UserEntity)
   @JoinColumn({ name: 'userId' })
-  user: UserEntity;
+  user: UserEntity | null;
 
   @Column({ type: 'uuid', nullable: true })
   chatId?: string;
