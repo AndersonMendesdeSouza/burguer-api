@@ -39,6 +39,17 @@ export class ImageService {
 
   async removeByIds(ids: number[]): Promise<void> {
     if (!ids.length) return;
+
+    for (const id of ids) {
+      const img = await this.repo.findOne({
+        where: { id },
+      });
+
+      if (img?.imagePublicId) {
+        await this.cloudnary.deleteImage(img.imagePublicId);
+      }
+    }
+
     await this.repo.delete(ids);
   }
 }

@@ -154,6 +154,9 @@ export class ProductsService {
     this.logger.log(`Removendo produto: ${id}`);
 
     const product = await this.findOne(id);
+    const ids = product.images.map((img) => img.id);
+
+    await this.imageService.removeByIds(ids);
     await this.repo.remove(product);
 
     this.logger.log(`Produto removido com sucesso: ${id}`);
