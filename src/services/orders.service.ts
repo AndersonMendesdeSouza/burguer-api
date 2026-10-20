@@ -37,18 +37,46 @@ export class OrdersService {
     dto: OrderRequestDto,
     user: AuthenticatedUser,
   ): Promise<OrderResponseDto> {
-    const address = await this.addressRepo.findOne({
-      where: {
-        id: dto.addressId,
-        userId: user.id,
-      },
-    });
+    const mesaId = dto.mesaId?.trim() || null;
+    const addressId = dto.addressId;
 
-    if (!address) {
-      throw new NotFoundException('Endereço não encontrado');
+    if (!mesaId && !addressId) {
+      throw new BadRequestException('Informe a mesa ou o endereço de entrega');
     }
 
-    const order = this.repo.create({ ...dto, userId: user.id, address });
+    if (mesaId && addressId) {
+      throw new BadRequestException(
+        'Informe apenas a mesa ou o endereço de entrega',
+      );
+    }
+
+    if (mesaId && dto.deliveryFee !== 0) {
+      throw new BadRequestException(
+        'Pedido em mesa não deve ter taxa de entrega',
+      );
+    }
+
+    let address: AddressEntity | undefined;
+
+    if (addressId) {
+      const savedAddress = await this.addressRepo.findOne({
+        where: { id: addressId, userId: user.id },
+      });
+
+      if (!savedAddress) {
+        throw new NotFoundException('Endereço não encontrado');
+      }
+
+      address = savedAddress;
+    }
+
+    const order = this.repo.create({
+      ...dto,
+      mesaId,
+      addressId: address?.id,
+      userId: user.id,
+      address,
+    });
     order.history = [
       {
         status: OrderStatusEnum.RECEIVED,

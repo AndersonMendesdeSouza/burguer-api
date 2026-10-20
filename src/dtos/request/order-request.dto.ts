@@ -45,9 +45,9 @@ export class OrderRequestDto {
   @IsString()
   customerPhone: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID()
-  addressId: string;
+  addressId?: string;
 
   @IsNotEmpty()
   @Type(() => Number)
