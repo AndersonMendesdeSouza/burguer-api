@@ -3,13 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ImageEntity } from 'src/entities/image.entity';
 import { Repository } from 'typeorm';
 import { ProductEntity } from 'src/entities/product-entity';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Injectable()
 export class ImageService {
   constructor(
     @InjectRepository(ImageEntity)
     private readonly repo: Repository<ImageEntity>,
-  ) {}
+    private readonly cloudnary: CloudinaryService,
+  ) { }
 
   async saveAll(
     files: Express.Multer.File[],
@@ -17,12 +19,18 @@ export class ImageService {
     options?: { firstIsPrimary?: boolean },
   ): Promise<ImageEntity[]> {
     const firstIsPrimary = options?.firstIsPrimary ?? true;
-    const images = files.map((file, index) =>
-      this.repo.create({
-        fileName: file.originalname,
-        url: `uploads/${file.filename}`,
-        isPrimary: firstIsPrimary && index === 0,
-        product,
+
+    const images = await Promise.all(
+      files.map(async (file, index) => {
+        const { imageUrl, imagePublicId } =
+          await this.cloudnary.uploadImage(file);
+
+        return this.repo.create({
+          imageUrl,
+          imagePublicId,
+          isPrimary: firstIsPrimary && index === 0,
+          product,
+        });
       }),
     );
 

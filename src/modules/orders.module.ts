@@ -6,7 +6,6 @@ import { AddressEntity } from 'src/entities/address.entity';
 import { OrderEntity } from 'src/entities/order.entity';
 import { ProductEntity } from 'src/entities/product-entity';
 import { ProductsModule } from './products.module';
-import { ImageService } from 'src/services/image.service';
 import { OrdersService } from 'src/services/orders.service';
 import { ChatModule } from './chat.module';
 
@@ -22,7 +21,7 @@ import { ChatModule } from './chat.module';
     ChatModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, ImageService],
+  providers: [OrdersService],
   exports: [OrdersService],
 })
 export class OrdersModule {}

@@ -15,7 +15,7 @@ export class ProductsService {
     @InjectRepository(ProductEntity)
     private readonly repo: Repository<ProductEntity>,
     private readonly imageService: ImageService,
-  ) {}
+  ) { }
 
   async create(dto: ProductRequestDto, files?: Express.Multer.File[]) {
     this.logger.log('Criando produto');

@@ -8,6 +8,7 @@ import { OrdersModule } from './modules/orders.module';
 import { SystemSettingsModule } from './modules/system-settings.module';
 import { AddressModule } from './modules/address.module';
 import { ChatModule } from './modules/chat.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { ChatModule } from './modules/chat.module';
     SystemSettingsModule,
     AddressModule,
     ChatModule,
+    CloudinaryModule,
   ],
 })
 export class AppModule {}

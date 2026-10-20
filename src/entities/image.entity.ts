@@ -6,11 +6,11 @@ export class ImageEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  fileName: string;
+  @Column({ type: 'text', nullable: true })
+  imageUrl: string | null;
 
-  @Column()
-  url: string;
+  @Column({ type: 'varchar', nullable: true })
+  imagePublicId: string | null;
 
   @Column({ default: false })
   isPrimary: boolean;
