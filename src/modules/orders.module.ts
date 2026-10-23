@@ -8,6 +8,7 @@ import { ProductEntity } from 'src/entities/product-entity';
 import { ProductsModule } from './products.module';
 import { OrdersService } from 'src/services/orders.service';
 import { ChatModule } from './chat.module';
+import { MessageModule } from './message.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ChatModule } from './chat.module';
     ]),
     ProductsModule,
     ChatModule,
+    MessageModule
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

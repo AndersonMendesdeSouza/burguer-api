@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -26,6 +27,7 @@ import {
   createGuestOrderToken,
   verifyGuestOrderToken,
 } from 'src/utils/guest-order-token';
+import { MessageService } from './message.service';
 
 type AuthenticatedUser = {
   id: string;
@@ -35,12 +37,15 @@ type AuthenticatedUser = {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(OrderEntity)
     private readonly repo: Repository<OrderEntity>,
     @InjectRepository(AddressEntity)
     private readonly addressRepo: Repository<AddressEntity>,
     private readonly chatService: ChatService,
+    private readonly messageService: MessageService,
   ) {}
 
   async create(
@@ -107,6 +112,21 @@ export class OrdersService {
     ];
 
     const savedOrder = await this.repo.save(order);
+    const message =
+      `🍔 *Pedido recebido!*\n\n` +
+      `Seu pedido #${savedOrder.id} foi recebido com sucesso!\n\n` +
+      `Em breve começaremos a preparação.\n\n` +
+      `Obrigado pela preferência!`;
+
+    try {
+      await this.messageService.sendMessage(dto.customerPhone, message);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Erro desconhecido';
+      this.logger.error(
+        `Falha ao enviar WhatsApp do pedido ${savedOrder.id}: ${reason}`,
+      );
+    }
+
     if (user) {
       await this.chatService.create({ orderId: savedOrder.id }, user);
       return this.findById(savedOrder.id, user);

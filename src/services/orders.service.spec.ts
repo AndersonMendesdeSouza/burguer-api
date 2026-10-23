@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { AddressEntity } from '../entities/address.entity';
 import { OrderEntity } from '../entities/order.entity';
 import { ChatService } from './chat.service';
 import { OrdersService } from './orders.service';
+import { MessageService } from './message.service';
 import { OrderStatusEnum } from '../dtos/enums/order-status.enum';
 import {
   createGuestOrderToken,
@@ -37,6 +39,7 @@ describe('OrdersService', () => {
   };
   const addressRepo = { findOne: jest.fn() };
   const chatService = { create: jest.fn() };
+  const messageService = { sendMessage: jest.fn() };
 
   function createPayload(): OrderRequestDto {
     return {
@@ -70,6 +73,7 @@ describe('OrdersService', () => {
         { provide: getRepositoryToken(OrderEntity), useValue: orderRepo },
         { provide: getRepositoryToken(AddressEntity), useValue: addressRepo },
         { provide: ChatService, useValue: chatService },
+        { provide: MessageService, useValue: messageService },
       ],
     }).compile();
 
@@ -83,6 +87,7 @@ describe('OrdersService', () => {
     });
     orderRepo.findOne.mockResolvedValue({ id: 'order-id', userId: user.id });
     addressRepo.findOne.mockResolvedValue(address);
+    messageService.sendMessage.mockResolvedValue({});
   });
 
   afterAll(() => {
@@ -135,6 +140,43 @@ describe('OrdersService', () => {
         total: 30,
       }),
     );
+    expect(messageService.sendMessage).toHaveBeenCalledTimes(1);
+    expect(messageService.sendMessage).toHaveBeenCalledWith(
+      dto.customerPhone,
+      expect.stringContaining('#order-id'),
+    );
+  });
+
+  it('returns the saved order and logs the failure when WhatsApp is unavailable', async () => {
+    const loggerError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    messageService.sendMessage.mockRejectedValue(
+      new Error('WhatsApp indisponível'),
+    );
+
+    try {
+      const response = await service.create(createPayload(), user);
+
+      expect(response.id).toBe('order-id');
+      expect(orderRepo.save).toHaveBeenCalledTimes(1);
+      expect(chatService.create).toHaveBeenCalledWith(
+        { orderId: 'order-id' },
+        user,
+      );
+      expect(loggerError).toHaveBeenCalledWith(
+        expect.stringContaining('WhatsApp indisponível'),
+      );
+    } finally {
+      loggerError.mockRestore();
+    }
+  });
+
+  it('does not send WhatsApp when saving the order fails', async () => {
+    orderRepo.save.mockRejectedValue(new Error('Falha ao salvar pedido'));
+
+    await expect(service.create(createPayload(), user)).rejects.toThrow(
+      'Falha ao salvar pedido',
+    );
+    expect(messageService.sendMessage).not.toHaveBeenCalled();
   });
 
   it('rejects an order without a destination', async () => {
@@ -198,6 +240,11 @@ describe('OrdersService', () => {
     expect(response.userId).toBeNull();
     expect(response.mesaId).toBe('12');
     expect(response.guestToken).toEqual(expect.any(String));
+    expect(messageService.sendMessage).toHaveBeenCalledTimes(1);
+    expect(messageService.sendMessage).toHaveBeenCalledWith(
+      createPayload().customerPhone,
+      expect.stringContaining(`#${response.id}`),
+    );
     expect(() =>
       verifyGuestOrderToken(response.guestToken!, response.id),
     ).not.toThrow();
