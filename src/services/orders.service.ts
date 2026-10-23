@@ -112,11 +112,17 @@ export class OrdersService {
     ];
 
     const savedOrder = await this.repo.save(order);
+    const productList = savedOrder.items
+      .slice(0, 3)
+      .map((item) => `• ${item.quantity}x ${item.name}`)
+      .join('\n');
+
     const message =
-      `🍔 *Pedido recebido!*\n\n` +
-      `Seu pedido #${savedOrder.id} foi recebido com sucesso!\n\n` +
-      `Em breve começaremos a preparação.\n\n` +
-      `Obrigado pela preferência!`;
+      `🍔 Olá, ${dto.customerName.trim()}!\n\n` +
+      `*Recebemos seu pedido!* 🎉\n\n` +
+      `*Uma prévia do que vem por aí:*\n${productList}\n\n` +
+      `Em breve, começaremos a preparar tudo com carinho.\n\n` +
+      `Obrigado pela preferência! 😋`;
 
     try {
       await this.messageService.sendMessage(dto.customerPhone, message);
